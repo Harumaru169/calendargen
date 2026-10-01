@@ -107,6 +107,17 @@ def _date(value: object, name: str) -> date:
     return value
 
 
+def _check_fields(data: dict, allowed: set[str], context: str) -> None:
+    for name in data:
+        if name not in allowed:
+            raise ValueError(f"{context} has unknown field {name!r}")
+
+
+def _check_term_date(day: date, start: date, end: date, context: str) -> None:
+    if not start <= day <= end:
+        raise ValueError(f"{context} {day} is outside term {start} to {end}")
+
+
 def _weekday(value: object, name: str) -> int:
     if not isinstance(value, str) or value not in WEEKDAYS:
         raise ValueError(f"{name} must be one of: {', '.join(WEEKDAYS)}")
@@ -133,6 +144,19 @@ def load_schedule(path: Path) -> Schedule:
     except tomllib.TOMLDecodeError as error:
         raise ValueError(f"invalid TOML in {path}: {error}") from error
 
+    _check_fields(
+        data,
+        {
+            "term_start",
+            "term_end",
+            "excluded_dates",
+            "description_footer",
+            "time_slots",
+            "courses",
+            "day_overrides",
+        },
+        "schedule",
+    )
     start = _date(data.get("term_start"), "term_start")
     end = _date(data.get("term_end"), "term_end")
     if end < start:
@@ -141,9 +165,12 @@ def load_schedule(path: Path) -> Schedule:
     excluded_dates = data.get("excluded_dates", [])
     if not isinstance(excluded_dates, list):
         raise ValueError("excluded_dates must be a list of TOML dates")
-    excluded_dates = frozenset(
-        _date(day, "excluded_dates item") for day in excluded_dates
-    )
+    parsed_excluded_dates: set[date] = set()
+    for value in excluded_dates:
+        day = _date(value, "excluded_dates item")
+        _check_term_date(day, start, end, "excluded_dates item")
+        parsed_excluded_dates.add(day)
+    excluded_dates = frozenset(parsed_excluded_dates)
 
     description_footer = data.get("description_footer")
     if description_footer is not None and not isinstance(description_footer, str):
@@ -156,6 +183,7 @@ def load_schedule(path: Path) -> Schedule:
     for name, time_slot in time_slots.items():
         if not name.strip() or not isinstance(time_slot, dict):
             raise ValueError(f"invalid time slot: {name!r}")
+        _check_fields(time_slot, {"start", "end"}, f"time slot {name!r}")
         begins = _clock(time_slot.get("start"), f"time slot {name!r} start")
         ends = _clock(time_slot.get("end"), f"time slot {name!r} end")
         if ends <= begins:
@@ -169,6 +197,11 @@ def load_schedule(path: Path) -> Schedule:
     for index, course in enumerate(courses, start=1):
         if not isinstance(course, dict):
             raise ValueError(f"course {index} must be a table")
+        _check_fields(
+            course,
+            {"title", "weekday", "time_slot", "location", "description"},
+            f"course {index}",
+        )
         title = course.get("title")
         if not isinstance(title, str) or not title.strip():
             raise ValueError(f"course {index} needs a title")
@@ -193,7 +226,13 @@ def load_schedule(path: Path) -> Schedule:
     for index, override in enumerate(overrides, start=1):
         if not isinstance(override, dict):
             raise ValueError(f"day_overrides item {index} must be a table")
+        _check_fields(
+            override,
+            {"date", "use_weekday", "all_day_event_title"},
+            f"day_overrides item {index}",
+        )
         day = _date(override.get("date"), f"day_overrides item {index} date")
+        _check_term_date(day, start, end, f"day_overrides item {index} date")
         if day in excluded_dates:
             raise ValueError(f"{day} appears in both excluded_dates and day_overrides")
         if day in parsed_overrides:

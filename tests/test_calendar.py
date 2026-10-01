@@ -138,6 +138,83 @@ class CalendarTests(unittest.TestCase):
         ):
             load_schedule(self.toml_path)
 
+    def test_unknown_fields_identify_their_location(self):
+        cases = (
+            (
+                "schedule",
+                "term_strat",
+                SCHEDULE.replace(
+                    "term_start = 2026-05-04",
+                    "term_start = 2026-05-04\nterm_strat = 2026-05-04",
+                ),
+            ),
+            (
+                "time slot 'period 1'",
+                "star",
+                SCHEDULE.replace('start = "08:45"', 'star = "08:45"'),
+            ),
+            (
+                "course 1",
+                "titel",
+                SCHEDULE.replace('title = "Monday class"', 'titel = "Monday class"'),
+            ),
+            (
+                "day_overrides item 1",
+                "use_weekdays",
+                SCHEDULE.replace('use_weekday = "mon"', 'use_weekdays = "mon"'),
+            ),
+        )
+        for context, field, contents in cases:
+            with self.subTest(context=context):
+                self.toml_path.write_text(contents, encoding="utf-8")
+                with self.assertRaises(ValueError) as raised:
+                    load_schedule(self.toml_path)
+                self.assertIn(context, str(raised.exception))
+                self.assertIn(field, str(raised.exception))
+
+    def test_excluded_dates_must_be_within_term_including_boundaries(self):
+        for day in ("2026-05-03", "2026-05-12"):
+            with self.subTest(day=day):
+                self.toml_path.write_text(
+                    SCHEDULE.replace("2026-05-05]", f"{day}]"),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError) as raised:
+                    load_schedule(self.toml_path)
+                self.assertIn(day, str(raised.exception))
+                self.assertIn("2026-05-04 to 2026-05-11", str(raised.exception))
+
+        self.toml_path.write_text(
+            SCHEDULE.replace("2026-05-05]", "2026-05-04, 2026-05-11]"),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            load_schedule(self.toml_path).excluded_dates,
+            frozenset((date(2026, 5, 4), date(2026, 5, 11))),
+        )
+
+    def test_day_overrides_dates_must_be_within_term_including_boundaries(self):
+        for day in ("2026-05-03", "2026-05-12"):
+            with self.subTest(day=day):
+                self.toml_path.write_text(
+                    SCHEDULE.replace("date = 2026-05-06", f"date = {day}"),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError) as raised:
+                    load_schedule(self.toml_path)
+                self.assertIn(day, str(raised.exception))
+                self.assertIn("2026-05-04 to 2026-05-11", str(raised.exception))
+
+        for day in ("2026-05-04", "2026-05-11"):
+            with self.subTest(day=day):
+                self.toml_path.write_text(
+                    SCHEDULE.replace("date = 2026-05-06", f"date = {day}"),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    date.fromisoformat(day), load_schedule(self.toml_path).overrides
+                )
+
     @patch("calendargen.schedule.get_localzone", return_value=ZoneInfo("Asia/Tokyo"))
     def test_all_day_event_title_adds_an_event_with_or_without_a_course(self, _zone):
         for weekday, event_count in (("mon", 4), ("sun", 3)):
@@ -202,7 +279,7 @@ class CalendarTests(unittest.TestCase):
         self.toml_path.write_text(
             SCHEDULE.replace(
                 "excluded_dates = [2026-05-05]", "excluded_dates = []"
-            ).replace("date = 2026-05-06", "date = 2026-05-12"),
+            ).replace('use_weekday = "mon"', 'use_weekday = "wed"'),
             encoding="utf-8",
         )
         calendar = Calendar.from_ical(
@@ -314,6 +391,33 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(
             len(list(Calendar.from_ical(ics_path.read_bytes()).walk("VEVENT"))), 3
         )
+
+    def test_cli_validation_failure_does_not_create_or_overwrite_output(self):
+        self.toml_path.write_text(
+            SCHEDULE.replace('use_weekday = "mon"', 'use_weekdays = "mon"'),
+            encoding="utf-8",
+        )
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                ics_path = self.directory / "calendar.ics"
+                if existing:
+                    ics_path.write_bytes(b"previous calendar")
+                with (
+                    patch.object(
+                        sys,
+                        "argv",
+                        ["calendargen", "gen", str(self.toml_path), str(ics_path)],
+                    ),
+                    self.assertRaises(SystemExit) as raised,
+                    redirect_stderr(io.StringIO()) as stderr,
+                ):
+                    main()
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn("use_weekdays", stderr.getvalue())
+                if existing:
+                    self.assertEqual(ics_path.read_bytes(), b"previous calendar")
+                else:
+                    self.assertFalse(ics_path.exists())
 
 
 if __name__ == "__main__":

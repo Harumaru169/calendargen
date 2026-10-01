@@ -66,6 +66,8 @@ all_day_event_title = "Monday schedule"
 - `all_day_event_title` is an optional text field on a day override. When nonblank, it creates an additional all-day event on that date with the text as its title. Omit it on overrides that need no all-day event.
 - `description_footer` is optional. When set, CalendarGen appends it after a blank line to each course description and adds it as the description of events that have none, including all-day override events. Omit it or set it to a blank string to leave descriptions unchanged. A distinctive footer makes it easier to search for and delete all generated events after importing an ICS file, so you can revise the schedule and import it again.
 
+Unknown field names in the schedule, time slots, courses, or day overrides are errors. Dates in `excluded_dates` and `day_overrides` must fall between `term_start` and `term_end`, inclusive; out-of-range dates are also errors. CalendarGen does not create or replace the ICS file when validation fails.
+
 Event times use the local timezone of the machine running CalendarGen. The generated ICS file contains one event for each occurrence within the term.
 
 ## License
