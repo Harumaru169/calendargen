@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calendargen"
+version = "0.1.0"
+description = "Generate an iCalendar file from a TOML class schedule."
+requires-python = ">=3.12"
+dependencies = ["icalendar", "tzlocal"]
+
+[project.scripts]
+calendargen = "calendargen.cli:main"
+
+[project.optional-dependencies]
+dev = ["ipython", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+lint.select = ["E", "F", "I", "UP", "B"]
+lint.ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
