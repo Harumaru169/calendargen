@@ -1,6 +1,7 @@
 """Read a class schedule and turn it into an iCalendar file."""
 
 import tomllib
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
@@ -10,7 +11,7 @@ from tzlocal import get_localzone
 
 TEMPLATE = """term_start = 2026-10-01
 term_end = 2027-01-22
-holidays = [2026-10-12, 2026-11-03]
+excluded_dates = [2026-10-12, 2026-11-03]
 
 [time_slots]
 "period 1" = { start = "08:45", end = "10:15" }
@@ -51,6 +52,53 @@ WEEKDAYS = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class TimeSlot:
+    name: str
+    start: time
+    end: time
+
+
+@dataclass(frozen=True, slots=True)
+class Course:
+    title: str
+    weekday: int
+    time_slot: TimeSlot
+    location: str | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DayOverride:
+    date: date
+    use_weekday: int
+    all_day_event_title: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Schedule:
+    start: date
+    end: date
+    excluded_dates: frozenset[date]
+    time_slots: dict[str, TimeSlot]
+    courses: tuple[Course, ...]
+    overrides: dict[date, DayOverride]
+
+    def weekday_on(self, day: date) -> int:
+        override = self.overrides.get(day)
+        return day.weekday() if override is None else override.use_weekday
+
+    def courses_on(self, day: date) -> list[tuple[int, Course]]:
+        if day < self.start or day > self.end or day in self.excluded_dates:
+            return []
+        weekday = self.weekday_on(day)
+        return [
+            (index, course)
+            for index, course in enumerate(self.courses)
+            if course.weekday == weekday
+        ]
+
+
 def _date(value: object, name: str) -> date:
     if type(value) is not date:
         raise ValueError(f"{name} must be a TOML date")
@@ -75,7 +123,7 @@ def _clock(value: object, name: str) -> time:
     return result
 
 
-def load_schedule(path: Path) -> dict:
+def load_schedule(path: Path) -> Schedule:
     """Load and check the fields needed to generate the calendar."""
     try:
         with path.open("rb") as file:
@@ -88,15 +136,17 @@ def load_schedule(path: Path) -> dict:
     if end < start:
         raise ValueError("term_end must not precede term_start")
 
-    holidays = data.get("holidays", [])
-    if not isinstance(holidays, list):
-        raise ValueError("holidays must be a list of TOML dates")
-    holidays = {_date(day, "holidays item") for day in holidays}
+    excluded_dates = data.get("excluded_dates", [])
+    if not isinstance(excluded_dates, list):
+        raise ValueError("excluded_dates must be a list of TOML dates")
+    excluded_dates = frozenset(
+        _date(day, "excluded_dates item") for day in excluded_dates
+    )
 
     time_slots = data.get("time_slots")
     if not isinstance(time_slots, dict) or not time_slots:
         raise ValueError("time_slots must contain at least one time slot")
-    parsed_time_slots = {}
+    parsed_time_slots: dict[str, TimeSlot] = {}
     for name, time_slot in time_slots.items():
         if not name.strip() or not isinstance(time_slot, dict):
             raise ValueError(f"invalid time slot: {name!r}")
@@ -104,12 +154,12 @@ def load_schedule(path: Path) -> dict:
         ends = _clock(time_slot.get("end"), f"time slot {name!r} end")
         if ends <= begins:
             raise ValueError(f"time slot {name!r} end must be after start")
-        parsed_time_slots[name] = (begins, ends)
+        parsed_time_slots[name] = TimeSlot(name, begins, ends)
 
     courses = data.get("courses")
     if not isinstance(courses, list):
         raise ValueError("courses must be a list of tables")
-    parsed_courses = []
+    parsed_courses: list[Course] = []
     for index, course in enumerate(courses, start=1):
         if not isinstance(course, dict):
             raise ValueError(f"course {index} must be a table")
@@ -126,18 +176,20 @@ def load_schedule(path: Path) -> dict:
         description = course.get("description")
         if description is not None and not isinstance(description, str):
             raise ValueError(f"course {index} description must be a string")
-        parsed_courses.append((title, weekday, time_slot, location, description))
+        parsed_courses.append(
+            Course(title, weekday, parsed_time_slots[time_slot], location, description)
+        )
 
     overrides = data.get("day_overrides", [])
     if not isinstance(overrides, list):
         raise ValueError("day_overrides must be a list of tables")
-    parsed_overrides = {}
+    parsed_overrides: dict[date, DayOverride] = {}
     for index, override in enumerate(overrides, start=1):
         if not isinstance(override, dict):
             raise ValueError(f"day_overrides item {index} must be a table")
         day = _date(override.get("date"), f"day_overrides item {index} date")
-        if day in holidays:
-            raise ValueError(f"{day} appears in both holidays and day_overrides")
+        if day in excluded_dates:
+            raise ValueError(f"{day} appears in both excluded_dates and day_overrides")
         if day in parsed_overrides:
             raise ValueError(f"duplicate day_overrides date: {day}")
         weekday = _weekday(
@@ -148,33 +200,36 @@ def load_schedule(path: Path) -> dict:
             raise ValueError(
                 f"day_overrides item {index} all_day_event_title must be a string"
             )
-        parsed_overrides[day] = (weekday, annotation)
+        parsed_overrides[day] = DayOverride(day, weekday, annotation)
 
-    return {
-        "start": start,
-        "end": end,
-        "holidays": holidays,
-        "time_slots": parsed_time_slots,
-        "courses": parsed_courses,
-        "overrides": parsed_overrides,
-    }
+    return Schedule(
+        start,
+        end,
+        excluded_dates,
+        parsed_time_slots,
+        tuple(parsed_courses),
+        parsed_overrides,
+    )
 
 
-def generate_calendar(schedule: dict, source: Path) -> bytes:
+def generate_calendar(schedule: Schedule, source: Path) -> bytes:
     """Generate course occurrences and optional all-day override annotations."""
     local_zone = get_localzone()
     calendar = Calendar()
     calendar.add("prodid", "-//CalendarGen//EN")
     calendar.add("version", "2.0")
 
-    day = schedule["start"]
-    while day <= schedule["end"]:
-        if day not in schedule["holidays"]:
-            override = schedule["overrides"].get(day)
-            weekday = day.weekday() if override is None else override[0]
-            if override is not None and override[1] and override[1].strip():
+    day = schedule.start
+    while day <= schedule.end:
+        if day not in schedule.excluded_dates:
+            override = schedule.overrides.get(day)
+            if (
+                override is not None
+                and override.all_day_event_title
+                and override.all_day_event_title.strip()
+            ):
                 annotation = Event()
-                annotation.add("summary", override[1])
+                annotation.add("summary", override.all_day_event_title)
                 annotation.add("dtstart", day)
                 annotation.add("dtend", day + timedelta(days=1))
                 annotation.add("dtstamp", datetime.now(UTC))
@@ -184,34 +239,29 @@ def generate_calendar(schedule: dict, source: Path) -> bytes:
                     f"{uuid5(NAMESPACE_URL, f'{source.resolve()}:allday_annotation:{day}')}@calendargen",
                 )
                 calendar.add_component(annotation)
-            for index, (
-                title,
-                course_weekday,
-                time_slot,
-                location,
-                description,
-            ) in enumerate(schedule["courses"]):
-                if weekday != course_weekday:
-                    continue
-                begins, ends = schedule["time_slots"][time_slot]
+            for index, course in schedule.courses_on(day):
                 event = Event()
-                event.add("summary", title)
-                event.add("dtstart", datetime.combine(day, begins, local_zone))
-                event.add("dtend", datetime.combine(day, ends, local_zone))
+                event.add("summary", course.title)
+                event.add(
+                    "dtstart", datetime.combine(day, course.time_slot.start, local_zone)
+                )
+                event.add(
+                    "dtend", datetime.combine(day, course.time_slot.end, local_zone)
+                )
                 event.add("dtstamp", datetime.now(UTC))
                 event.add(
                     "uid",
                     f"{uuid5(NAMESPACE_URL, f'{source.resolve()}:{index}:{day}')}@calendargen",
                 )
-                if location:
-                    event.add("location", location)
-                if description is not None:
-                    event.add("description", description)
+                if course.location:
+                    event.add("location", course.location)
+                if course.description is not None:
+                    event.add("description", course.description)
                 calendar.add_component(event)
         day += timedelta(days=1)
 
     calendar.add_missing_timezones(
-        first_date=schedule["start"],
-        last_date=schedule["end"] + timedelta(days=1),
+        first_date=schedule.start,
+        last_date=schedule.end + timedelta(days=1),
     )
     return calendar.to_ical()

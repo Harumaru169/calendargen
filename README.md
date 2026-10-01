@@ -39,7 +39,7 @@ Import `calendar.ics` into a calendar application that supports iCalendar files.
 ```toml
 term_start = 2026-10-01
 term_end = 2027-01-22
-holidays = [2026-11-03]
+excluded_dates = [2026-11-03]
 
 [time_slots]
 "period 2" = { start = "10:30", end = "12:00" }
@@ -58,10 +58,10 @@ all_day_event_title = "Monday schedule"
 ```
 
 - `term_start` and `term_end` are inclusive TOML dates.
-- `holidays` skips all events on the listed dates. It can be omitted.
+- `excluded_dates` skips all events on the listed dates. It can be omitted.
 - Each `time_slots` entry defines a named local start and end time. Courses refer to these names through `time_slot`.
 - Each `[[courses]]` entry defines a weekly event. `title`, `weekday`, and `time_slot` are required; `location` and `description` are optional. Weekdays are `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, or `sun`.
-- A `[[day_overrides]]` entry uses another weekday's course schedule on a specific date. In the example, October 15 follows the Monday schedule. Overrides are optional and cannot share a date with `holidays`.
+- A `[[day_overrides]]` entry uses another weekday's course schedule on a specific date. In the example, October 15 follows the Monday schedule. Overrides are optional and cannot share a date with `excluded_dates`.
 - `all_day_event_title` is an optional text field on a day override. When nonblank, it creates an additional all-day event on that date with the text as its title. Omit it on overrides that need no all-day event.
 
 Event times use the local timezone of the machine running CalendarGen. The generated ICS file contains one event for each occurrence within the term.

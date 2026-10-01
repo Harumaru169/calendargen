@@ -12,11 +12,19 @@ from zoneinfo import ZoneInfo
 from icalendar import Calendar
 
 from calendargen.cli import main
-from calendargen.schedule import TEMPLATE, generate_calendar, load_schedule
+from calendargen.schedule import (
+    TEMPLATE,
+    Course,
+    DayOverride,
+    Schedule,
+    TimeSlot,
+    generate_calendar,
+    load_schedule,
+)
 
 SCHEDULE = """term_start = 2026-05-04
 term_end = 2026-05-11
-holidays = [2026-05-05]
+excluded_dates = [2026-05-05]
 
 [time_slots]
 "period 1" = { start = "08:45", end = "10:15" }
@@ -66,6 +74,23 @@ class CalendarTests(unittest.TestCase):
         self.toml_path.write_text(TEMPLATE, encoding="utf-8")
         load_schedule(self.toml_path)
 
+    def test_schedule_uses_domain_objects_and_selects_courses(self):
+        schedule = load_schedule(self.toml_path)
+        self.assertIsInstance(schedule, Schedule)
+        self.assertIsInstance(schedule.time_slots["period 1"], TimeSlot)
+        self.assertIsInstance(schedule.courses[0], Course)
+        self.assertIs(schedule.courses[0].time_slot, schedule.time_slots["period 1"])
+        self.assertIsInstance(schedule.overrides[date(2026, 5, 6)], DayOverride)
+        self.assertEqual(schedule.weekday_on(date(2026, 5, 6)), 0)
+        self.assertEqual(
+            schedule.courses_on(date(2026, 5, 6)), [(0, schedule.courses[0])]
+        )
+        self.assertEqual(
+            schedule.courses_on(date(2026, 5, 4)), [(0, schedule.courses[0])]
+        )
+        self.assertEqual(schedule.courses_on(date(2026, 5, 5)), [])
+        self.assertEqual(schedule.courses_on(date(2026, 5, 12)), [])
+
     @patch("calendargen.schedule.get_localzone", return_value=ZoneInfo("Asia/Tokyo"))
     def test_calendar_dates_overrides_and_timezone(self, _zone):
         calendar = Calendar.from_ical(
@@ -98,12 +123,16 @@ class CalendarTests(unittest.TestCase):
             ],
         )
 
-    def test_holiday_and_override_collision_is_an_error(self):
+    def test_excluded_date_and_override_collision_is_an_error(self):
         self.toml_path.write_text(
-            SCHEDULE.replace("holidays = [2026-05-05]", "holidays = [2026-05-06]"),
+            SCHEDULE.replace(
+                "excluded_dates = [2026-05-05]", "excluded_dates = [2026-05-06]"
+            ),
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(ValueError, "both holidays and day_overrides"):
+        with self.assertRaisesRegex(
+            ValueError, "both excluded_dates and day_overrides"
+        ):
             load_schedule(self.toml_path)
 
     @patch("calendargen.schedule.get_localzone", return_value=ZoneInfo("Asia/Tokyo"))
@@ -168,9 +197,9 @@ class CalendarTests(unittest.TestCase):
 
     def test_named_and_numeric_time_slots(self):
         self.toml_path.write_text(
-            SCHEDULE.replace("holidays = [2026-05-05]", "holidays = []").replace(
-                "date = 2026-05-06", "date = 2026-05-12"
-            ),
+            SCHEDULE.replace(
+                "excluded_dates = [2026-05-05]", "excluded_dates = []"
+            ).replace("date = 2026-05-06", "date = 2026-05-12"),
             encoding="utf-8",
         )
         calendar = Calendar.from_ical(
