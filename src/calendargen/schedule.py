@@ -9,7 +9,7 @@ from icalendar import Calendar, Event
 from tzlocal import get_localzone
 
 TEMPLATE = """term_start = 2026-10-01
-term_end = 2026-01-22
+term_end = 2027-01-22
 holidays = [2026-10-12, 2026-11-03]
 
 [time_slots]
