@@ -10,6 +10,19 @@ Requires Python 3.12 or later.
 pip install .
 ```
 
+With [uv](https://docs.astral.sh/uv/), install the CLI as a tool:
+
+```sh
+uv tool install .
+```
+
+Or run it from this repository without a separate installation:
+
+```sh
+uv run calendargen init calendar.toml
+uv run calendargen gen calendar.toml calendar.ics
+```
+
 ## Usage
 
 Create a starter schedule, edit it, and generate an ICS file:
