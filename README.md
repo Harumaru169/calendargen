@@ -54,6 +54,7 @@ description = "Professor Smith"
 [[day_overrides]]
 date = 2026-10-15
 use_weekday = "mon"
+all_day_event_title = "Monday schedule"
 ```
 
 - `term_start` and `term_end` are inclusive TOML dates.
@@ -61,6 +62,7 @@ use_weekday = "mon"
 - Each `time_slots` entry defines a named local start and end time. Courses refer to these names through `time_slot`.
 - Each `[[courses]]` entry defines a weekly event. `title`, `weekday`, and `time_slot` are required; `location` and `description` are optional. Weekdays are `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, or `sun`.
 - A `[[day_overrides]]` entry uses another weekday's course schedule on a specific date. In the example, October 15 follows the Monday schedule. Overrides are optional and cannot share a date with `holidays`.
+- `all_day_event_title` is an optional text field on a day override. When nonblank, it creates an additional all-day event on that date with the text as its title. Omit it on overrides that need no all-day event.
 
 Event times use the local timezone of the machine running CalendarGen. The generated ICS file contains one event for each occurrence within the term.
 

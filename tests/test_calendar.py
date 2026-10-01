@@ -58,7 +58,11 @@ class CalendarTests(unittest.TestCase):
         data = tomllib.loads(TEMPLATE)
         self.assertEqual(data["time_slots"]["period 1"]["start"], "08:45")
         self.assertIn("lunch", data["time_slots"])
-        self.assertEqual(data["courses"][0]["description"], "Professor Smith")
+        self.assertEqual(data["courses"][0]["description"], "Professor Tsujimoto")
+        self.assertEqual(
+            data["day_overrides"][0]["all_day_event_title"],
+            "swapped to Monday schedule",
+        )
         self.toml_path.write_text(TEMPLATE, encoding="utf-8")
         load_schedule(self.toml_path)
 
@@ -100,6 +104,66 @@ class CalendarTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(ValueError, "both holidays and day_overrides"):
+            load_schedule(self.toml_path)
+
+    @patch("calendargen.schedule.get_localzone", return_value=ZoneInfo("Asia/Tokyo"))
+    def test_all_day_event_title_adds_an_event_with_or_without_a_course(self, _zone):
+        for weekday, event_count in (("mon", 4), ("sun", 3)):
+            with self.subTest(weekday=weekday):
+                self.toml_path.write_text(
+                    SCHEDULE.replace(
+                        'use_weekday = "mon"',
+                        f'use_weekday = "{weekday}"\nall_day_event_title = "Schedule change"',
+                    ),
+                    encoding="utf-8",
+                )
+                schedule = load_schedule(self.toml_path)
+                events = list(
+                    Calendar.from_ical(
+                        generate_calendar(schedule, self.toml_path)
+                    ).walk("VEVENT")
+                )
+                annotations = [
+                    event
+                    for event in events
+                    if str(event["SUMMARY"]) == "Schedule change"
+                ]
+                self.assertEqual(len(annotations), 1)
+                annotation = annotations[0]
+                self.assertEqual(annotation.decoded("DTSTART"), date(2026, 5, 6))
+                self.assertEqual(annotation.decoded("DTEND"), date(2026, 5, 7))
+                self.assertEqual(len(events), event_count)
+                self.assertEqual(
+                    len({str(event["UID"]) for event in events}), len(events)
+                )
+                regenerated = Calendar.from_ical(
+                    generate_calendar(schedule, self.toml_path)
+                )
+                self.assertEqual(
+                    str(annotation["UID"]),
+                    str(
+                        next(
+                            event
+                            for event in regenerated.walk("VEVENT")
+                            if str(event["SUMMARY"]) == "Schedule change"
+                        )["UID"]
+                    ),
+                )
+
+    def test_blank_or_missing_all_day_event_title_adds_no_event(self):
+        for field in ("", 'all_day_event_title = ""', 'all_day_event_title = "   "'):
+            with self.subTest(field=field):
+                self.toml_path.write_text(SCHEDULE + field + "\n", encoding="utf-8")
+                events = Calendar.from_ical(
+                    generate_calendar(load_schedule(self.toml_path), self.toml_path)
+                )
+                self.assertEqual(len(list(events.walk("VEVENT"))), 3)
+
+    def test_all_day_event_title_must_be_text(self):
+        self.toml_path.write_text(
+            SCHEDULE + "all_day_event_title = 42\n", encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "all_day_event_title must be a string"):
             load_schedule(self.toml_path)
 
     def test_named_and_numeric_time_slots(self):

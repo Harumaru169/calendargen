@@ -37,10 +37,12 @@ location = "Lecture Room 4, Research Building No.8"
 [[day_overrides]]
 date = 2026-10-15
 use_weekday = "mon"
+all_day_event_title = "swapped to Monday schedule"
 
 [[day_overrides]]
 date = 2026-11-26
 use_weekday = "tue"
+all_day_event_title = "swapped to Tuesday schedule, don't forget!"
 """
 
 WEEKDAYS = {
@@ -138,9 +140,15 @@ def load_schedule(path: Path) -> dict:
             raise ValueError(f"{day} appears in both holidays and day_overrides")
         if day in parsed_overrides:
             raise ValueError(f"duplicate day_overrides date: {day}")
-        parsed_overrides[day] = _weekday(
+        weekday = _weekday(
             override.get("use_weekday"), f"day_overrides item {index} use_weekday"
         )
+        annotation = override.get("all_day_event_title")
+        if annotation is not None and not isinstance(annotation, str):
+            raise ValueError(
+                f"day_overrides item {index} all_day_event_title must be a string"
+            )
+        parsed_overrides[day] = (weekday, annotation)
 
     return {
         "start": start,
@@ -153,7 +161,7 @@ def load_schedule(path: Path) -> dict:
 
 
 def generate_calendar(schedule: dict, source: Path) -> bytes:
-    """Generate one VEVENT per course occurrence."""
+    """Generate course occurrences and optional all-day override annotations."""
     local_zone = get_localzone()
     calendar = Calendar()
     calendar.add("prodid", "-//CalendarGen//EN")
@@ -162,7 +170,20 @@ def generate_calendar(schedule: dict, source: Path) -> bytes:
     day = schedule["start"]
     while day <= schedule["end"]:
         if day not in schedule["holidays"]:
-            weekday = schedule["overrides"].get(day, day.weekday())
+            override = schedule["overrides"].get(day)
+            weekday = day.weekday() if override is None else override[0]
+            if override is not None and override[1] and override[1].strip():
+                annotation = Event()
+                annotation.add("summary", override[1])
+                annotation.add("dtstart", day)
+                annotation.add("dtend", day + timedelta(days=1))
+                annotation.add("dtstamp", datetime.now(UTC))
+                # Keep the UID stable when the TOML field is renamed.
+                annotation.add(
+                    "uid",
+                    f"{uuid5(NAMESPACE_URL, f'{source.resolve()}:allday_annotation:{day}')}@calendargen",
+                )
+                calendar.add_component(annotation)
             for index, (
                 title,
                 course_weekday,
