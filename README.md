@@ -7,16 +7,16 @@ CalendarGen turns a declarative TOML schedule into an iCalendar (`.ics`) file. I
 Requires Python 3.12 or later.
 
 ```sh
-pip install .
+pip install calendargen
 ```
 
 With [uv](https://docs.astral.sh/uv/), install the CLI as a tool:
 
 ```sh
-uv tool install .
+uv tool install calendargen
 ```
 
-Or run it from this repository without a separate installation:
+To install from a local checkout for development, use `uv tool install --editable .`. You can also run it from this repository without a separate installation:
 
 ```sh
 uv run calendargen init calendar.toml
@@ -33,6 +33,10 @@ calendargen gen calendar.toml calendar.ics
 ```
 
 Import `calendar.ics` into a calendar application that supports iCalendar files. `init` creates a new file and will not overwrite an existing one.
+
+### Updating an imported schedule
+
+Edit `calendar.toml` and run `calendargen gen calendar.toml calendar.ics` again. Before importing the new ICS file, remove the events from the previous import in your calendar application. A distinctive `description_footer` helps you find those events; importing the new file alone may leave duplicates, depending on the application. Import the regenerated ICS file after removing the old events.
 
 ## Schedule format
 
@@ -72,4 +76,4 @@ Event times use the local timezone of the machine running CalendarGen. The gener
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/Harumaru169/calendargen/blob/main/LICENSE).

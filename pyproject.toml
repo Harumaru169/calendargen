@@ -6,8 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "calendargen"
 version = "0.1.0"
 description = "Generate an iCalendar file from a TOML class schedule."
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["icalendar", "tzlocal"]
+
+[project.urls]
+Repository = "https://github.com/Harumaru169/calendargen"
+Issues = "https://github.com/Harumaru169/calendargen/issues"
 
 [project.scripts]
 calendargen = "calendargen.cli:main"
